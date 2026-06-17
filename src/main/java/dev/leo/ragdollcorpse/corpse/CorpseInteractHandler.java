@@ -1,6 +1,5 @@
 package dev.leo.ragdollcorpse.corpse;
 
-import dev.leo.sableplayerragdoll.api.RagdollAPI;
 import dev.leo.sableplayerragdoll.api.RagdollInteractEvent;
 import java.util.UUID;
 import net.minecraft.network.chat.Component;
@@ -15,31 +14,31 @@ public final class CorpseInteractHandler {
    }
 
    public static void onRagdollInteract(RagdollInteractEvent event) {
-      UUID torsoId = RagdollAPI.torsoSubLevelId(event.headId());
-      if (torsoId == null || !torsoId.equals(event.partId())) return;
+      UUID rootId = event.rootId();
+      if (!rootId.equals(event.partId())) return;
 
       CorpseSavedData data = CorpseSavedData.get(event.level());
-      SimpleContainer container = data.getContainer(event.headId());
+      SimpleContainer container = data.getContainer(rootId);
       if (container == null) return;
 
       ServerPlayer player = event.player();
 
       if (player.isShiftKeyDown()) {
          lootAll(player.getInventory(), container);
-         if (isEmpty(container)) data.markForRelease(event.headId());
+         if (isEmpty(container)) data.markForRelease(rootId);
          event.setCanceled(true);
          return;
       }
 
       if (isEmpty(container)) {
-         data.releaseEmptyCorpseNow(event.headId(), event.level());
+         data.releaseEmptyCorpseNow(rootId, event.level());
          event.setCanceled(true);
          return;
       }
 
-      String ownerName = data.getOwnerName(event.headId());
+      String ownerName = data.getOwnerName(rootId);
       player.openMenu(new SimpleMenuProvider(
-         (id, playerInv, p) -> new CorpseMenu(id, playerInv, container, event.headId(), event.level()),
+         (id, playerInv, p) -> new CorpseMenu(id, playerInv, container, rootId, event.level()),
          Component.translatable("container.ragdoll_corpse.corpse", ownerName)
       ));
       event.setCanceled(true);
