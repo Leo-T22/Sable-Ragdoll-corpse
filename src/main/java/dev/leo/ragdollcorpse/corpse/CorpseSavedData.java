@@ -22,6 +22,7 @@ import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.ListTag;
 import net.minecraft.nbt.Tag;
 import net.minecraft.server.level.ServerLevel;
+import net.minecraft.world.Containers;
 import net.minecraft.world.SimpleContainer;
 import net.minecraft.world.entity.EquipmentSlot;
 import net.minecraft.world.item.ItemStack;
@@ -162,6 +163,7 @@ public final class CorpseSavedData extends SavedData {
       for (UUID headId : containers.keySet()) {
          Long releaseAt = releaseAtTicks.get(headId);
          if (releaseAt != null && gameTime >= releaseAt) {
+            dropStoredItems(headId, level);
             List<UUID> partIds = ragdollPartIds.getOrDefault(headId, List.of(headId));
             if (!CorpseRagdollSessions.hasKnownBody(level, headId, partIds) || CorpseRagdollSessions.tryRelease(level, headId, partIds)) {
                if (toPurge == null) toPurge = new ArrayList<>();
@@ -171,6 +173,7 @@ public final class CorpseSavedData extends SavedData {
          }
 
          if (corpseLifetime > 0L && gameTime - createdAtTicks.getOrDefault(headId, gameTime) >= corpseLifetime) {
+            dropStoredItems(headId, level);
             List<UUID> partIds = ragdollPartIds.getOrDefault(headId, List.of(headId));
             if (!CorpseRagdollSessions.hasKnownBody(level, headId, partIds) || CorpseRagdollSessions.tryRelease(level, headId, partIds)) {
                if (toPurge == null) toPurge = new ArrayList<>();
@@ -246,6 +249,7 @@ public final class CorpseSavedData extends SavedData {
    public boolean releaseCorpseNow(UUID headId, ServerLevel level) {
       if (!containers.containsKey(headId)) return false;
 
+      dropStoredItems(headId, level);
       List<UUID> partIds = ragdollPartIds.getOrDefault(headId, List.of(headId));
       if (!CorpseRagdollSessions.hasKnownBody(level, headId, partIds)) {
          purge(headId);
@@ -326,6 +330,32 @@ public final class CorpseSavedData extends SavedData {
 
    private long gameTimeNow() {
       return levelRef == null ? 0L : levelRef.getGameTime();
+   }
+
+   private void dropStoredItems(UUID headId, ServerLevel level) {
+      SimpleContainer container = containers.get(headId);
+      if (container == null || isEmpty(container)) return;
+
+      Vec3 pos = dropPos(headId, level);
+      for (int i = 0; i < container.getContainerSize(); i++) {
+         ItemStack stack = container.getItem(i);
+         if (!stack.isEmpty()) {
+            Containers.dropItemStack(level, pos.x, pos.y, pos.z, stack.copy());
+            container.setItem(i, ItemStack.EMPTY);
+         }
+      }
+      setDirty();
+   }
+
+   private Vec3 dropPos(UUID headId, ServerLevel level) {
+      SubLevel subLevel = SubLevelContainer.getContainer(level).getSubLevel(headId);
+      if (subLevel instanceof ServerSubLevel serverSubLevel && !serverSubLevel.isRemoved()) {
+         BlockPos corpsePos = corpseWorldPos(level, serverSubLevel);
+         if (corpsePos != null) return Vec3.atCenterOf(corpsePos);
+      }
+
+      BlockPos knownPos = lastKnownPos.get(headId);
+      return Vec3.atCenterOf(knownPos == null ? level.getSharedSpawnPos() : knownPos);
    }
 
    private void purge(UUID headId) {

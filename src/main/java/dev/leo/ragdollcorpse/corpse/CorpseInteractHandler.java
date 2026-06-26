@@ -11,6 +11,8 @@ import net.minecraft.world.item.ItemStack;
 import net.neoforged.fml.ModList;
 
 public final class CorpseInteractHandler {
+   private static final int MAIN_INVENTORY_SIZE = 36;
+
    private CorpseInteractHandler() {
    }
 
@@ -51,7 +53,7 @@ public final class CorpseInteractHandler {
          if (stack.isEmpty()) continue;
          ItemStack copy = stack.copy();
          moveToRestoreTarget(inv, copy, data.getRestoreTarget(headId, i));
-         if (!copy.isEmpty()) inv.add(copy);
+         if (!copy.isEmpty()) moveToMainInventory(inv, copy);
          container.setItem(i, copy.isEmpty() ? ItemStack.EMPTY : copy);
       }
       inv.setChanged();
@@ -82,6 +84,32 @@ public final class CorpseInteractHandler {
       int moved = Math.min(stack.getCount(), target.getMaxStackSize() - target.getCount());
       target.grow(moved);
       stack.shrink(moved);
+   }
+
+   private static void moveToMainInventory(Inventory inv, ItemStack stack) {
+      if (stack.isEmpty()) return;
+
+      int slots = Math.min(MAIN_INVENTORY_SIZE, inv.getContainerSize());
+      for (int slot = 0; slot < slots && !stack.isEmpty(); slot++) {
+         ItemStack target = inv.getItem(slot);
+         if (target.isEmpty() || !ItemStack.isSameItemSameComponents(target, stack)) continue;
+
+         int max = Math.min(target.getMaxStackSize(), inv.getMaxStackSize());
+         if (target.getCount() >= max) continue;
+
+         int moved = Math.min(stack.getCount(), max - target.getCount());
+         target.grow(moved);
+         stack.shrink(moved);
+      }
+
+      for (int slot = 0; slot < slots && !stack.isEmpty(); slot++) {
+         if (!inv.getItem(slot).isEmpty()) continue;
+
+         ItemStack moved = stack.copy();
+         moved.setCount(Math.min(stack.getCount(), Math.min(moved.getMaxStackSize(), inv.getMaxStackSize())));
+         inv.setItem(slot, moved);
+         stack.shrink(moved.getCount());
+      }
    }
 
    private static boolean isEmpty(SimpleContainer container) {
