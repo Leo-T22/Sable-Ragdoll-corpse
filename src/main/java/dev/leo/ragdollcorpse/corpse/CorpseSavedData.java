@@ -35,6 +35,7 @@ public final class CorpseSavedData extends SavedData {
    private static final Factory<CorpseSavedData> FACTORY = new Factory<>(CorpseSavedData::new, CorpseSavedData::load);
 
    private final Map<UUID, SimpleContainer> containers = new HashMap<>();
+   private final Map<UUID, RestoreTarget[]> restoreTargets = new HashMap<>();
    private final Map<UUID, String> ownerNames = new HashMap<>();
    private final Map<UUID, RagdollEquipmentSnapshot> equipmentSnapshots = new HashMap<>();
    private final Map<UUID, Long> createdAtTicks = new HashMap<>();
@@ -76,16 +77,19 @@ public final class CorpseSavedData extends SavedData {
             data.lastKnownPos.put(headId, new BlockPos(corpseTag.getInt("PosX"), corpseTag.getInt("PosY"), corpseTag.getInt("PosZ")));
          }
          SimpleContainer container = new SimpleContainer(SLOTS);
+         RestoreTarget[] targets = emptyRestoreTargets();
          ListTag itemList = corpseTag.getList("Items", Tag.TAG_COMPOUND);
          for (int j = 0; j < itemList.size(); j++) {
             CompoundTag itemTag = itemList.getCompound(j);
             int slot = itemTag.getInt("Slot");
             if (slot >= 0 && slot < SLOTS && itemTag.contains("Item")) {
                ItemStack.parse(registries, itemTag.get("Item")).ifPresent(stack -> container.setItem(slot, stack));
+               targets[slot] = loadRestoreTarget(itemTag);
             }
          }
          data.attachListeners(container, headId);
          data.containers.put(headId, container);
+         data.restoreTargets.put(headId, targets);
       }
       return data;
    }
@@ -118,6 +122,7 @@ public final class CorpseSavedData extends SavedData {
             if (!stack.isEmpty()) {
                CompoundTag itemTag = new CompoundTag();
                itemTag.putInt("Slot", slot);
+               saveRestoreTarget(itemTag, getRestoreTarget(headId, slot));
                itemTag.put("Item", stack.save(registries));
                itemList.add(itemTag);
             }
@@ -129,13 +134,16 @@ public final class CorpseSavedData extends SavedData {
       return tag;
    }
 
-   public void store(UUID headId, List<ItemStack> items, String ownerName, UUID ownerId, BlockPos deathPos, RagdollEquipmentSnapshot snapshot) {
+   public void store(UUID headId, List<ItemStack> items, List<RestoreTarget> itemRestoreTargets, String ownerName, UUID ownerId, BlockPos deathPos, RagdollEquipmentSnapshot snapshot) {
       SimpleContainer container = new SimpleContainer(SLOTS);
+      RestoreTarget[] targets = emptyRestoreTargets();
       for (int i = 0; i < Math.min(items.size(), SLOTS); i++) {
          container.setItem(i, items.get(i).copy());
+         if (i < itemRestoreTargets.size()) targets[i] = itemRestoreTargets.get(i);
       }
       attachListeners(container, headId);
       containers.put(headId, container);
+      restoreTargets.put(headId, targets);
       ownerNames.put(headId, ownerName);
       ownerIds.put(headId, ownerId);
       lastKnownPos.put(headId, deathPos);
@@ -177,6 +185,7 @@ public final class CorpseSavedData extends SavedData {
          SubLevel subLevel = subLevelContainer.getSubLevel(headId);
          if (subLevel instanceof ServerSubLevel serverSubLevel && !serverSubLevel.isRemoved()) {
             RagdollRegistry.tryRestoreOnLoad(level, serverSubLevel);
+            RagdollAPI.setCorpse(level, headId, true);
             BlockPos pos = corpseWorldPos(level, serverSubLevel);
             if (pos != null && !pos.equals(lastKnownPos.get(headId))) {
                lastKnownPos.put(headId, pos);
@@ -321,6 +330,7 @@ public final class CorpseSavedData extends SavedData {
 
    private void purge(UUID headId) {
       containers.remove(headId);
+      restoreTargets.remove(headId);
       ownerNames.remove(headId);
       ownerIds.remove(headId);
       lastKnownPos.remove(headId);
@@ -373,6 +383,77 @@ public final class CorpseSavedData extends SavedData {
       return containers.get(headId);
    }
 
+   public RestoreTarget getRestoreTarget(UUID headId, int containerSlot) {
+      RestoreTarget[] targets = restoreTargets.get(headId);
+      if (targets == null || containerSlot < 0 || containerSlot >= targets.length) return RestoreTarget.none();
+      RestoreTarget target = targets[containerSlot];
+      return target == null ? RestoreTarget.none() : target;
+   }
+
+   private static RestoreTarget[] emptyRestoreTargets() {
+      RestoreTarget[] targets = new RestoreTarget[SLOTS];
+      java.util.Arrays.fill(targets, RestoreTarget.none());
+      return targets;
+   }
+
+   private static RestoreTarget loadRestoreTarget(CompoundTag itemTag) {
+      if (itemTag.contains("RestoreKind")) {
+         RestoreKind kind = RestoreKind.bySerializedName(itemTag.getString("RestoreKind"));
+         if (kind == RestoreKind.PLAYER_INVENTORY) {
+            return RestoreTarget.playerInventory(itemTag.getInt("RestoreIndex"));
+         }
+         if ((kind == RestoreKind.CURIOS || kind == RestoreKind.ACCESSORIES) && itemTag.contains("RestoreSlotId")) {
+            return new RestoreTarget(kind, itemTag.getString("RestoreSlotId"), itemTag.getInt("RestoreIndex"), itemTag.getBoolean("RestoreCosmetic"));
+         }
+      }
+      if (itemTag.contains("OriginalSlot")) return RestoreTarget.playerInventory(itemTag.getInt("OriginalSlot"));
+      return RestoreTarget.none();
+   }
+
+   private static void saveRestoreTarget(CompoundTag itemTag, RestoreTarget target) {
+      if (target.kind() == RestoreKind.NONE) return;
+
+      itemTag.putString("RestoreKind", target.kind().serializedName());
+      itemTag.putInt("RestoreIndex", target.index());
+      if (!target.slotId().isBlank()) itemTag.putString("RestoreSlotId", target.slotId());
+      if (target.cosmetic()) itemTag.putBoolean("RestoreCosmetic", true);
+      if (target.kind() == RestoreKind.PLAYER_INVENTORY) itemTag.putInt("OriginalSlot", target.index());
+   }
+
+   public enum RestoreKind {
+      NONE("none"),
+      PLAYER_INVENTORY("player_inventory"),
+      CURIOS("curios"),
+      ACCESSORIES("accessories");
+
+      private final String serializedName;
+
+      RestoreKind(String serializedName) {
+         this.serializedName = serializedName;
+      }
+
+      public String serializedName() {
+         return serializedName;
+      }
+
+      static RestoreKind bySerializedName(String name) {
+         for (RestoreKind kind : values()) {
+            if (kind.serializedName.equals(name)) return kind;
+         }
+         return NONE;
+      }
+   }
+
+   public record RestoreTarget(RestoreKind kind, String slotId, int index, boolean cosmetic) {
+      public static RestoreTarget none() {
+         return new RestoreTarget(RestoreKind.NONE, "", -1, false);
+      }
+
+      public static RestoreTarget playerInventory(int slot) {
+         return new RestoreTarget(RestoreKind.PLAYER_INVENTORY, "", slot, false);
+      }
+   }
+
    private static void savePartIds(CompoundTag corpseTag, List<UUID> partIds) {
       ListTag list = new ListTag();
       for (UUID partId : partIds) {
@@ -409,7 +490,11 @@ public final class CorpseSavedData extends SavedData {
       });
       tag.put("Vanilla", vanilla);
       tag.put("Curios", saveSlotMap(snapshot.curioItems(), registries));
+      tag.put("CuriosCosmetics", saveSlotMap(snapshot.curioCosmeticItems(), registries));
+      tag.put("CuriosRenderOptions", saveBooleanSlotMap(snapshot.curioRenderOptions()));
       tag.put("Accessories", saveSlotMap(snapshot.accessoriesItems(), registries));
+      tag.put("AccessoriesCosmetics", saveSlotMap(snapshot.accessoriesCosmeticItems(), registries));
+      tag.put("AccessoriesRenderOptions", saveBooleanSlotMap(snapshot.accessoriesRenderOptions()));
       return tag;
    }
 
@@ -425,8 +510,12 @@ public final class CorpseSavedData extends SavedData {
       }
 
       Map<String, List<ItemStack>> curios = loadSlotMap(tag.getList("Curios", Tag.TAG_COMPOUND), registries);
+      Map<String, List<ItemStack>> curioCosmetics = loadSlotMap(tag.getList("CuriosCosmetics", Tag.TAG_COMPOUND), registries);
+      Map<String, List<Boolean>> curioRenderOptions = loadBooleanSlotMap(tag.getList("CuriosRenderOptions", Tag.TAG_COMPOUND));
       Map<String, List<ItemStack>> accessories = loadSlotMap(tag.getList("Accessories", Tag.TAG_COMPOUND), registries);
-      return new RagdollEquipmentSnapshot(vanilla, curios, accessories);
+      Map<String, List<ItemStack>> accessoryCosmetics = loadSlotMap(tag.getList("AccessoriesCosmetics", Tag.TAG_COMPOUND), registries);
+      Map<String, List<Boolean>> accessoryRenderOptions = loadBooleanSlotMap(tag.getList("AccessoriesRenderOptions", Tag.TAG_COMPOUND));
+      return new RagdollEquipmentSnapshot(vanilla, curios, curioCosmetics, curioRenderOptions, accessories, accessoryCosmetics, accessoryRenderOptions);
    }
 
    private static ListTag saveSlotMap(Map<String, List<ItemStack>> slotMap, net.minecraft.core.HolderLookup.Provider registries) {
@@ -459,6 +548,38 @@ public final class CorpseSavedData extends SavedData {
             stacks.add(itemTag == null ? ItemStack.EMPTY : ItemStack.parse(registries, itemTag).orElse(ItemStack.EMPTY));
          }
          if (!slotId.isBlank()) slotMap.put(slotId, stacks);
+      }
+      return slotMap;
+   }
+
+   private static ListTag saveBooleanSlotMap(Map<String, List<Boolean>> slotMap) {
+      ListTag list = new ListTag();
+      slotMap.forEach((slotId, options) -> {
+         CompoundTag slotTag = new CompoundTag();
+         slotTag.putString("SlotId", slotId);
+         ListTag optionList = new ListTag();
+         for (Boolean option : options) {
+            CompoundTag optionTag = new CompoundTag();
+            optionTag.putBoolean("Render", Boolean.TRUE.equals(option));
+            optionList.add(optionTag);
+         }
+         slotTag.put("Options", optionList);
+         list.add(slotTag);
+      });
+      return list;
+   }
+
+   private static Map<String, List<Boolean>> loadBooleanSlotMap(ListTag list) {
+      Map<String, List<Boolean>> slotMap = new LinkedHashMap<>();
+      for (int i = 0; i < list.size(); i++) {
+         CompoundTag slotTag = list.getCompound(i);
+         String slotId = slotTag.getString("SlotId");
+         ListTag optionList = slotTag.getList("Options", Tag.TAG_COMPOUND);
+         List<Boolean> options = new ArrayList<>(optionList.size());
+         for (int j = 0; j < optionList.size(); j++) {
+            options.add(optionList.getCompound(j).getBoolean("Render"));
+         }
+         if (!slotId.isBlank()) slotMap.put(slotId, List.copyOf(options));
       }
       return slotMap;
    }

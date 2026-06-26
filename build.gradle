@@ -55,6 +55,19 @@ repositories {
             username = System.getenv('local_maven_user') ?: project.findProperty('ryanhcodeMavenUser') ?: ''
             password = System.getenv('local_maven_token') ?: project.findProperty('ryanhcodeMavenToken') ?: ''
         }
+        content { includeGroupByRegex('dev\\.ryanhcode(\\..*)?') }
+    }
+
+    maven {
+        name = 'Curios'
+        url = 'https://maven.theillusivec4.top/'
+        content { includeGroup('top.theillusivec4.curios') }
+    }
+
+    maven {
+        name = 'Wisp Forest'
+        url = 'https://maven.wispforest.io'
+        content { includeGroup('io.wispforest') }
     }
 
     exclusiveContent {
@@ -94,6 +107,12 @@ dependencies {
     }
 
     implementation("dev.leo.sableplayerragdoll:sable_player_ragdoll-${minecraft_version}:${sable_player_ragdoll_version}")
+    compileOnly("top.theillusivec4.curios:curios-neoforge:${curios_version}:api") {
+        transitive = false
+    }
+    compileOnly("io.wispforest:accessories-neoforge:${accessories_version}") {
+        transitive = false
+    }
 }
 
 processResources {
