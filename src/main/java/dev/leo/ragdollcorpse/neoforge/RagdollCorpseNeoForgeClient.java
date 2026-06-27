@@ -1,6 +1,7 @@
 package dev.leo.ragdollcorpse.neoforge;
 
 import dev.leo.ragdollcorpse.RagdollCorpse;
+import dev.leo.ragdollcorpse.RagdollCorpseConfig;
 import dev.leo.ragdollcorpse.client.CorpseCompassClient;
 import dev.leo.ragdollcorpse.corpse.CorpseReleasePacket;
 import net.minecraft.client.gui.components.Button;
@@ -34,6 +35,7 @@ public final class RagdollCorpseNeoForgeClient {
       if (!(event.getScreen() instanceof ContainerScreen screen)) return;
       if (!(screen.getTitle().getContents() instanceof TranslatableContents contents)) return;
       if (!"container.ragdoll_corpse.corpse".equals(contents.getKey())) return;
+      if (!RagdollCorpseConfig.enableDespawnButton()) return;
 
       Button releaseButton = Button.builder(
             Component.translatable("container.ragdoll_corpse.release"),

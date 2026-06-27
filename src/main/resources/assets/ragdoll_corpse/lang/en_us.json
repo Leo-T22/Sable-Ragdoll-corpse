@@ -3,6 +3,7 @@
   "ragdoll_corpse.configuration.spawn_empty_inventory_corpses": "Spawn corpses for empty inventories",
   "ragdoll_corpse.configuration.corpse_lifetime_minutes": "Corpse lifetime",
   "ragdoll_corpse.configuration.empty_corpse_despawn_seconds": "Empty corpse despawn delay",
+  "ragdoll_corpse.configuration.enable_despawn_button": "Enable despawn button",
   "container.ragdoll_corpse.corpse": "%s's Corpse",
   "container.ragdoll_corpse.release": "Despawn Corpse"
 }
